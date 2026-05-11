@@ -45,8 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max-results",
         type=int,
-        default=None,
-        help="Stop after this many results (default: all).",
+        default=3,
+        help="Stop after this many results (default: 3).",
     )
     p.add_argument(
         "--results-per-page",
