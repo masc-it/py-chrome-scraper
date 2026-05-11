@@ -18,14 +18,6 @@ User asks about:
 
 **Not for:** evergreen information, documentation, academic papers, or topics better suited to web search.
 
-## Requirements
-
-Browser API server must be running:
-
-```bash
-uv run browser-api &
-```
-
 ## Inputs
 
 - **query** — search term or topic (required)
@@ -49,7 +41,7 @@ data/research/xcom-<slug>/
 Run `xcom-fetch` to search and download tweets.
 
 ```bash
-uv run xcom-fetch --query "<query>" --max-tweets 20
+xcom-fetch --query "<query>" --max-tweets 20
 ```
 
 Useful flags:
@@ -61,8 +53,8 @@ Useful flags:
 **Parallel runs:** launch multiple queries at once with different `--out-dir`:
 
 ```bash
-uv run xcom-fetch --query "trend italia" --out-dir data/research/xcom-trend-italia &
-uv run xcom-fetch --query "italia oggi" --out-dir data/research/xcom-italia-oggi &
+xcom-fetch --query "trend italia" --out-dir data/research/xcom-trend-italia &
+xcom-fetch --query "italia oggi" --out-dir data/research/xcom-italia-oggi &
 wait
 ```
 

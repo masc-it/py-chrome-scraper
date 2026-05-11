@@ -35,7 +35,7 @@ data/research/<query-slug>/<tag>/
 Run `google-fetch` to search and download results.
 
 ```bash
-uv run google-fetch --query "<query>" --tag <tag>
+google-fetch --query "<query>" --tag <tag>
 ```
 
 Useful flags:
@@ -51,8 +51,8 @@ Produces `results.json` and one `.html` + `.md` pair per result.
 **Parallel runs:** launch up to 6 queries at once with different `--tag` values so outputs don't collide:
 
 ```bash
-uv run google-fetch --query "DQN paper" --tag dqn &
-uv run google-fetch --query "Double DQN" --tag ddqn &
+google-fetch --query "DQN paper" --tag dqn &
+google-fetch --query "Double DQN" --tag ddqn &
 wait
 ```
 
@@ -107,7 +107,7 @@ Ask: *are there gaps, unexplained terms, or subtopics that the current sources d
 If yes, fire one or more focused follow-up queries:
 
 ```bash
-uv run google-fetch --query "<refined query>" --tag <tag>
+google-fetch --query "<refined query>" --tag <tag>
 ```
 
 Refined queries with the **same `--tag`** go into the same folder so files accumulate across iterations.
