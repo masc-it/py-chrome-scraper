@@ -1,9 +1,13 @@
 # chrome-scraper
 
-Stealth and stateful Chrome scraper, built for AI agents.
-Shared browser server with profile persistence with pre-built CLI scrapers for Google and x.com that dump content in HTML + clean markdown.
+Stealth and stateful Chrome scraper, built to let AI agents easily grab up-to-date information in markdown.
+
+Shared browser server with profile persistence, with pre-built CLI scrapers for Google and x.com that dump content in HTML + clean markdown.
+
 
 `chrome-scraper` is a Python package built on [Patchright](https://pypi.org/project/patchright/) (a maintained Playwright fork) that runs a single long-lived Chrome instance behind a FastAPI HTTP API. Clients can connect concurrently, share cookies/sessions via a persistent profile, and avoid the cold-start/teardown cost of per-task browser launch.
+
+You can find some prebuild skills under [.agents/skills](.agents/skills)
 
 ## Install
 
