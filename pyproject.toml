@@ -1,0 +1,28 @@
+[project]
+name = "chrome-scraper"
+version = "0.1.0"
+description = "Steatlh and stateful Chrome scraper"
+readme = "README.md"
+authors = [
+    { name = "Mauro Sciancalepore", email = "maurosciancalepore98@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "jinja2>=3.1.4",
+    "patchright>=1.52.0",
+    "playwright>=1.59.0",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.scripts]
+html-to-md = "chrome_scraper.html_to_md.cli:main"
+browser-api = "chrome_scraper.browser_api.cli:main"
+google-fetch = "chrome_scraper.web_scrapers.google_fetch_cli:main"
+xcom-fetch = "chrome_scraper.web_scrapers.xcom_fetch_cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
