@@ -31,10 +31,10 @@ uv run browser-api [--headless]
 html-to-md https://example.com --output out/example.md
 
 # 3. Search Google and download results
-google-fetch --query "machine learning" --max-results 3 --num-pages 1 --out-dir data/research/ml
+google-fetch --query "latest pydantic version" --max-results 2 --num-pages 1 --out-dir data/searches/latest-pydantic-version
 
 # 4. Search x.com and download tweets
-xcom-fetch --query "ai safety" --max-results 10 --out-dir data/research/xcom-ai
+xcom-fetch --query "latest ai news" --max-results 10 --out-dir data/research/xcom-latest-ai-news
 ```
 
 `browser-api` is a persistent server — start it once, run scrapers against it from multiple terminals or scripts. Chrome keeps cookies, logins, and profile state across sessions.
