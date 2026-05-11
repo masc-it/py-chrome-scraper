@@ -13,7 +13,7 @@ You can find some prebuild skills under [.agents/skills](.agents/skills)
 
 ```bash
 # Core package
-uv add chrome-scraper
+uv tool install chrome-scraper
 
 # Or install from source
 uv sync
