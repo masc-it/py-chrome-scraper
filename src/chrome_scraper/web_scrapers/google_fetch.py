@@ -3,6 +3,12 @@
 Single browser session: scrape results → click each link → dump outerHTML → back.
 Supports multi-page scraping and result filtering.
 The caller owns the browser lifecycle; this module only drives the tab.
+
+**Site-specific plugins**
+
+Certain domains (e.g. www.instagram.com, www.youtube.com) need a different
+fetch flow because their SPA intercepts anchor clicks or their DOM doesn't
+match the generic readyState=complete wait.  Registered in ``_SITE_FETCHERS``.
 """
 
 from __future__ import annotations
@@ -11,8 +17,9 @@ import random
 import re
 import sys
 import time
+import urllib.parse
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from chrome_scraper.web_scrapers._fetch_common import dump_html_and_md, spam_back_until
 from chrome_scraper.web_scrapers.base import (
@@ -24,6 +31,33 @@ from chrome_scraper.web_scrapers.base import (
     wait_for,
 )
 from chrome_scraper.web_scrapers.google_search import GoogleSearchResultsScraper
+
+# ── Site-specific fetch handler registry ─────────────────────────────────
+# Signature: (browser, tab_ref, url, title, position, html_path, timeout, poll_interval)
+# The handler is responsible for navigating to *url* and dumping its content.
+# The caller (_fetch_one) handles back-navigation to Google.
+
+FetchHandler = Callable[
+    [BrowserTool, str, str, str, int, Path, float, float], None
+]
+
+_SITE_FETCHERS: dict[str, FetchHandler] = {}
+
+
+def register_fetcher(domain: str, handler: FetchHandler) -> None:
+    _SITE_FETCHERS[domain] = handler
+
+
+# ── Import and register bundled site plugins ─────────────────────────────
+
+from chrome_scraper.web_scrapers import instagram_fetch  # noqa: E402
+from chrome_scraper.web_scrapers import youtube_fetch  # noqa: E402
+
+register_fetcher("www.instagram.com", instagram_fetch.fetch_post_url)
+register_fetcher("instagram.com", instagram_fetch.fetch_post_url)
+register_fetcher("www.youtube.com", youtube_fetch.fetch_post_url)
+register_fetcher("youtube.com", youtube_fetch.fetch_post_url)
+register_fetcher("m.youtube.com", youtube_fetch.fetch_post_url)
 
 
 class FetchedPage(TypedDict):
@@ -64,36 +98,28 @@ def fetch_query(
         allowed_hosts=allowed_hosts,
     )
 
-    # Collect results across all pages.
     all_results: list[ScrapedDocument] = []
     for page_num in range(1, num_pages + 1):
         if page_num == 1:
             scraper.open_start_page(browser=browser, tab_ref=tab_ref, timeout=timeout)
         else:
             scraper.go_to_page(
-                browser=browser,
-                tab_ref=tab_ref,
-                page=page_num,
-                timeout=timeout,
-                poll_interval=poll_interval,
+                browser=browser, tab_ref=tab_ref,
+                page=page_num, timeout=timeout, poll_interval=poll_interval,
             )
 
         page_results = scraper.scrape_current_page(
-            browser=browser,
-            tab_ref=tab_ref,
-            timeout=timeout,
-            poll_interval=poll_interval,
+            browser=browser, tab_ref=tab_ref,
+            timeout=timeout, poll_interval=poll_interval,
         )
         all_results.extend(page_results)
 
-        # Respect max_results across pages.
         if max_results and len(all_results) >= max_results:
             all_results = all_results[:max_results]
             break
 
     save_index(all_results, out_dir / "results.json")
 
-    # Offset so repeated fetches into the same dir don't overwrite previous runs.
     existing = len(list(out_dir.glob("*.html")))
 
     fetched: list[FetchedPage] = []
@@ -102,35 +128,31 @@ def fetch_query(
     ):
         if max_results and len(fetched) >= max_results:
             break
-        # Jitter between clicks to look less robotic; skip before the first.
         if idx > 0:
             time.sleep(random.uniform(0.1, 0.5))
         url, title = item["url"], item["title"]
         html_path = out_dir / f"{i:02d}-{_slugify(title)}.html"
         try:
             _fetch_one(
-                browser=browser,
-                tab_ref=tab_ref,
-                url=url,
-                title=title,
-                position=i,
-                html_path=html_path,
-                timeout=timeout,
-                poll_interval=poll_interval,
+                browser=browser, tab_ref=tab_ref,
+                url=url, title=title, position=i, html_path=html_path,
+                timeout=timeout, poll_interval=poll_interval,
             )
-            fetched.append(
-                {
-                    "title": title,
-                    "url": url,
-                    "html_file": str(html_path),
-                    "md_file": str(html_path.with_suffix(".md")),
-                }
-            )
+            fetched.append({
+                "title": title,
+                "url": url,
+                "html_file": str(html_path),
+                "md_file": str(html_path.with_suffix(".md")),
+            })
         except WebScraperError as exc:
             print(f"[google-fetch] skip {url}: {exc}", file=sys.stderr, flush=True)
 
     return fetched
 
+
+# ---------------------------------------------------------------------------
+# Core: fetch-one with site-specific plugin dispatch
+# ---------------------------------------------------------------------------
 
 
 def _fetch_one(
@@ -144,63 +166,73 @@ def _fetch_one(
     timeout: float,
     poll_interval: float,
 ) -> None:
-    google_url = get_href(browser, tab_ref, timeout)
+    """Fetch a single result URL and dump its HTML + markdown.
 
-    result = browser.eval_js(
-        tab_ref=tab_ref,
-        expression=_click_result_script(url),
-        timeout=timeout,
-    )
-    if not isinstance(result, dict) or not result.get("clicked"):
-        raise WebScraperError(f"Anchor not found for {url}. JS returned: {result!r}")
+    Dispatches to a registered site handler if the result domain has one.
+    Otherwise uses the generic click-dump-back flow.
+    """
+    domain = urllib.parse.urlparse(url).netloc
+    handler = _SITE_FETCHERS.get(domain)
 
-    # URL changes immediately on click; wait for it so we know navigation started.
-    wait_for(
-        timeout=timeout,
-        poll_interval=poll_interval,
-        task=lambda: _href_changed(browser, tab_ref, timeout, from_url=google_url),
-        error_message=f"Navigation never left Google after clicking {url}",
-    )
+    if handler is not None:
+        handler(browser, tab_ref, url, title, position, html_path, timeout, poll_interval)
+    else:
+        # ── Generic flow: click from Google results → dump ──
+        google_url = get_href(browser, tab_ref, timeout)
 
-    # Then wait for the target page to fully render before dumping HTML.
-    wait_for(
-        timeout=timeout,
-        poll_interval=poll_interval,
-        task=lambda: _page_ready(browser, tab_ref, timeout),
-        error_message=f"Page never reached readyState=complete for {url}",
-    )
-
-    # Build frontmatter with title, url, position, optional description.
-    meta_desc = (
-        browser.eval_js(
+        result = browser.eval_js(
             tab_ref=tab_ref,
-            expression="document.querySelector('meta[name=\"description\"]')?.content || ''",
+            expression=_click_result_script(url),
             timeout=timeout,
         )
-        or ""
-    )
-    frontmatter = f"---\ntitle: {title!r}\nurl: {url}\nposition: {position}\n"
-    if meta_desc:
-        frontmatter += f"description: {meta_desc!r}\n"
-    frontmatter += "---\n\n"
+        if not isinstance(result, dict) or not result.get("clicked"):
+            raise WebScraperError(
+                f"Anchor not found for {url}. JS returned: {result!r}"
+            )
 
-    dump_html_and_md(
-        browser=browser,
-        tab_ref=tab_ref,
-        url=url,
-        md_body=frontmatter,
-        html_path=html_path,
-        timeout=timeout,
-    )
+        wait_for(
+            timeout=timeout, poll_interval=poll_interval,
+            task=lambda: _href_changed(browser, tab_ref, timeout, from_url=google_url),
+            error_message=f"Navigation never left Google after clicking {url}",
+        )
 
+        wait_for(
+            timeout=timeout, poll_interval=poll_interval,
+            task=lambda: _page_ready(browser, tab_ref, timeout),
+            error_message=f"Page never reached readyState=complete for {url}",
+        )
+
+        meta_desc = (
+            browser.eval_js(
+                tab_ref=tab_ref,
+                expression="document.querySelector('meta[name=\"description\"]')?.content || ''",
+                timeout=timeout,
+            )
+            or ""
+        )
+        frontmatter = f"---\ntitle: {title!r}\nurl: {url}\nposition: {position}\n"
+        if meta_desc:
+            frontmatter += f"description: {meta_desc!r}\n"
+        frontmatter += "---\n\n"
+
+        dump_html_and_md(
+            browser=browser, tab_ref=tab_ref,
+            url=url, md_body=frontmatter, html_path=html_path,
+            timeout=timeout,
+        )
+
+    # ── Both handler and generic flow: navigate back to Google ──
     spam_back_until(
-        browser=browser,
-        tab_ref=tab_ref,
-        timeout=timeout,
-        poll_interval=poll_interval,
+        browser=browser, tab_ref=tab_ref,
+        timeout=timeout, poll_interval=poll_interval,
         predicate=lambda: _on_google_and_ready(browser, tab_ref, timeout),
         error_message="Timed out waiting to return to Google results",
     )
+
+
+# ---------------------------------------------------------------------------
+# Generic helpers
+# ---------------------------------------------------------------------------
 
 
 def _click_result_script(url: str) -> str:
