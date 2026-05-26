@@ -22,6 +22,8 @@ html-to-md = "chrome_scraper.html_to_md.cli:main"
 browser-api = "chrome_scraper.browser_api.cli:main"
 google-fetch = "chrome_scraper.web_scrapers.google_fetch_cli:main"
 xcom-fetch = "chrome_scraper.web_scrapers.xcom_fetch_cli:main"
+insta-fetch = "chrome_scraper.web_scrapers.instagram_fetch_cli:main"
+yt-fetch = "chrome_scraper.web_scrapers.youtube_fetch_cli:main"
 
 [build-system]
 requires = ["uv_build>=0.10.0,<0.11.0"]

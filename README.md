@@ -184,6 +184,63 @@ data/research/xcom-<query>/
 └── ...
 ```
 
+### yt-fetch
+
+Fetch a YouTube video page with expanded description and transcript as HTML + markdown.
+
+```bash
+# Fetch video by URL
+yt-fetch "https://www.youtube.com/watch?v=JVTUtdzqeGI"
+
+# Short URL
+yt-fetch "https://youtu.be/JVTUtdzqeGI"
+
+# Custom output dir
+yt-fetch "https://www.youtube.com/watch?v=JVTUtdzqeGI" --out-dir data/youtube/video
+```
+
+Output layout:
+
+```
+data/youtube/<video-id>/
+├── <video-id>.html        # raw outerHTML with expanded transcript
+├── <video-id>.md          # frontmatter + rendered markdown
+```
+
+### insta-fetch
+
+Search Instagram and download posts/reels as HTML + markdown.
+
+Requires login — start `browser-api` non-headless once, log in at instagram.com.
+Cookies persist in the profile for future runs.
+
+```bash
+# Keyword search
+insta-fetch --query "aurora borealis"
+
+# Profile posts
+insta-fetch --profile "nasa"
+
+# Hashtag search
+insta-fetch --hashtag "space"
+
+# Single post by URL
+insta-fetch --post "https://www.instagram.com/p/CxYZ12345/"
+
+# Limit results
+insta-fetch --query "machine learning" --max-results 5
+```
+
+Output layout:
+
+```
+data/research/insta-<query>/
+├── results.json           # permalink + shortcode + type + caption snippet
+├── 01-username-ABC123.html
+├── 01-username-ABC123.md   # frontmatter + rendered markdown
+└── ...
+```
+
 ## Python API
 
 ```python
