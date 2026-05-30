@@ -27,7 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Requires a running browser-api server (uv run browser-api)."
         ),
     )
-    p.add_argument("--query", required=True, help="Search keyword(s).")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--query", help="Search keyword(s).")
+    src.add_argument(
+        "--post",
+        help="Fetch a single tweet URL (including any quoted tweets inside).",
+    )
     p.add_argument(
         "--from",
         dest="from_profile",
@@ -53,7 +58,48 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    browser = BrowserAPIClient(base_url=args.browser_api, timeout=args.timeout)
 
+    if args.post:
+        # ── Single tweet fetch (with quote tweet recursion) ──
+        m = re.search(r"/status/(\d+)", args.post)
+        status_id = m.group(1) if m else "tweet"
+        slug_source = f"xcom-post-{status_id}"
+        out_dir = (
+            Path(args.out_dir)
+            if args.out_dir
+            else _DEFAULT_OUT_ROOT / _slugify(slug_source)
+        )
+        tab_label = f"xcom-post-{status_id}"
+        try:
+            with browser.tab(tab_label):
+                from chrome_scraper.web_scrapers.xcom_fetch import fetch_single_post
+                fetched = fetch_single_post(
+                    browser=browser,
+                    tab_ref=tab_label,
+                    url=args.post,
+                    out_dir=out_dir,
+                    timeout=args.timeout,
+                    poll_interval=args.poll_interval,
+                )
+            print(
+                json.dumps(
+                    {
+                        "post": args.post,
+                        "out_dir": str(out_dir),
+                        "count": len(fetched),
+                        "tweets": fetched,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return 0
+        except WebScraperError as exc:
+            emit_error(str(exc))
+            return 1
+
+    # ── Search mode ──
     slug_source = (
         f"xcom-from-{args.from_profile}-{args.query}"
         if args.from_profile
@@ -64,7 +110,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.out_dir
         else _DEFAULT_OUT_ROOT / _slugify(slug_source)
     )
-    browser = BrowserAPIClient(base_url=args.browser_api, timeout=args.timeout)
 
     tab_label = f"xcom-{_slugify(args.query)[:30]}"
 

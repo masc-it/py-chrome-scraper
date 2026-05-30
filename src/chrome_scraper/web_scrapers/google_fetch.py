@@ -52,12 +52,15 @@ def register_fetcher(domain: str, handler: FetchHandler) -> None:
 
 from chrome_scraper.web_scrapers import instagram_fetch  # noqa: E402
 from chrome_scraper.web_scrapers import youtube_fetch  # noqa: E402
+from chrome_scraper.web_scrapers import xcom_fetch  # noqa: E402
 
 register_fetcher("www.instagram.com", instagram_fetch.fetch_post_url)
 register_fetcher("instagram.com", instagram_fetch.fetch_post_url)
 register_fetcher("www.youtube.com", youtube_fetch.fetch_post_url)
 register_fetcher("youtube.com", youtube_fetch.fetch_post_url)
 register_fetcher("m.youtube.com", youtube_fetch.fetch_post_url)
+register_fetcher("x.com", xcom_fetch.fetch_post_url)
+register_fetcher("www.x.com", xcom_fetch.fetch_post_url)
 
 
 class FetchedPage(TypedDict):

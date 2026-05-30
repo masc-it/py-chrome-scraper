@@ -1,6 +1,6 @@
 [project]
 name = "chrome-scraper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Steatlh and stateful Chrome scraper"
 readme = "README.md"
 authors = [
@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 html-to-md = "chrome_scraper.html_to_md.cli:main"
+url-to-md = "chrome_scraper.url_to_md.cli:main"
 browser-api = "chrome_scraper.browser_api.cli:main"
 google-fetch = "chrome_scraper.web_scrapers.google_fetch_cli:main"
 xcom-fetch = "chrome_scraper.web_scrapers.xcom_fetch_cli:main"

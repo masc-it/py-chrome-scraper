@@ -18,6 +18,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from chrome_scraper.html_to_md.extract import _EXTRACT_JS, _SCROLL_JS
+from chrome_scraper.html_to_md.render import render_page
 from chrome_scraper.web_scrapers.base import WAIT_UNTIL_MAP, probe_chrome_identity_async
 
 
@@ -54,6 +56,21 @@ class PressRequest(BaseModel):
 
 class FocusRequest(BaseModel):
     selector: str
+
+
+class ConvertRequest(BaseModel):
+    url: str
+    wait_until: str = "load"
+    scroll: bool = True
+    timeout: float | None = None
+
+
+class ConvertResponse(BaseModel):
+    url: str
+    title: str
+    markdown: str
+    extract_count: int
+    viewport: dict[str, Any] | None = None
 
 
 class StatusResponse(BaseModel):
@@ -374,6 +391,61 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"press failed: {exc}")
         return {"pressed": True}
+
+    @app.post("/get-page-as-md")
+    async def get_page_as_md(req: ConvertRequest):
+        ctx = _require_context()
+        page = await ctx.new_page()
+        try:
+            pw_wait = WAIT_UNTIL_MAP.get(req.wait_until)
+            if pw_wait is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported wait_until: {req.wait_until}",
+                )
+            timeout_ms = int(
+                (req.timeout if req.timeout is not None else _STATE.timeout_ms / 1000)
+                * 1000
+            )
+            await page.goto(req.url, wait_until=pw_wait, timeout=timeout_ms)
+
+            if req.scroll:
+                try:
+                    await page.evaluate(_SCROLL_JS)
+                except Exception:
+                    pass
+
+            payload = (await page.evaluate(_EXTRACT_JS)) or {}
+
+            items = payload.get("items") or []
+            viewport = payload.get("viewport") or {}
+            page_width = float(viewport.get("scroll_w") or viewport.get("w") or 1280)
+
+            md = render_page(items, page_width)
+            title = (payload.get("title") or "").strip()
+            if title:
+                md = f"# {title}\n\n{md}"
+
+            from fastapi.responses import PlainTextResponse
+
+            return PlainTextResponse(
+                content=md,
+                media_type="text/plain",
+                headers={
+                    "X-Page-Title": title,
+                    "X-Page-Url": payload.get("url") or req.url,
+                    "X-Extract-Count": str(len(items)),
+                },
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Conversion failed: {exc}")
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     return app
 
