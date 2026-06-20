@@ -42,7 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--out-dir", help="Output directory (default: data/research/<slug>/)."
     )
     p.add_argument(
-        "--max-results", type=int, default=20, help="Max results to fetch (default: 20)."
+        "--max-results",
+        type=int,
+        default=20,
+        help="Max results to fetch (default: 20).",
     )
     p.add_argument(
         "--timeout", type=float, default=30.0, help="Per-operation timeout in seconds."
@@ -74,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             with browser.tab(tab_label):
                 from chrome_scraper.web_scrapers.xcom_fetch import fetch_single_post
+
                 fetched = fetch_single_post(
                     browser=browser,
                     tab_ref=tab_label,

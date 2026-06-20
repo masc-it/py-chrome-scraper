@@ -46,7 +46,7 @@ xcom-fetch --query "latest ai news" --max-results 10 --out-dir data/research/xco
 │                browser-api (port 9333)                │
 │  ┌──────────────────────────────────────────────────┐ │
 │  │  FastAPI server                                  │ │
-│  │  /status  /tabs  /tabs/{id}/goto  /eval  /type   │ │
+│  │  /status /tabs /goto /eval /html /type /press │ │
 │  └──────────┬───────────────────────────────────────┘ │
 │             │ owns                                    │
 │  ┌──────────▼───────────────────────────────────────┐ │
@@ -91,6 +91,21 @@ Stateful features:
 - **Persistent profile** — cookies, localStorage, and logins survive restarts. Profile lives at `~/Library/Application Support/thebase/playwright/profile/` on macOS.
 - **Headless identity** — when `--headless` is used, the server automatically probes a throwaway headless instance, strips the `HeadlessChrome` token from the User-Agent, and passes the clean UA to the real persistent context.
 - **Hide macOS window** — `--hide` runs `osascript` to hide Chrome from sight without quitting (non-headless only).
+
+### url-to-md
+
+Render a live URL as layout-preserving markdown. Site-specific handlers are used automatically when available — for example, YouTube watch URLs are expanded and transcript markdown is prepended before the generic page render.
+
+```bash
+# Generic page
+url-to-md https://example.com --output out/page.md
+
+# Custom handler kicks in automatically for supported URL patterns
+url-to-md "https://www.youtube.com/watch?v=JVTUtdzqeGI" --output out/video.md
+
+# Print to stdout
+url-to-md https://example.com --output -
+```
 
 ### html-to-md
 
@@ -289,6 +304,11 @@ with client.tab("my-tab"):
 - Background-tab patch so Chrome stays out of the way.
 - Headless-mode UA cleaning (strips `HeadlessChrome`).
 - macOS hide support (`--hide`).
+
+**url-to-md** — single live URL to markdown:
+
+- Uses the shared URL dispatcher and custom handlers automatically when a URL pattern is supported.
+- Falls back to generic layout-preserving extraction for unknown sites.
 
 **html-to-md** — layout-preserving markdown via Chrome CDP:
 

@@ -1,7 +1,8 @@
-"""`url-to-md` CLI: render a URL as markdown via the browser-api /get-page-as-md endpoint.
+"""`url-to-md` CLI: render a URL as markdown via browser-api.
 
-Thin wrapper — delegates everything to the server. Requires a running
-browser-api server (start with: uv run browser-api).
+Uses the shared URL dispatcher, so known hosts get their custom scraper
+preparation automatically before the generic layout-to-markdown renderer runs.
+Requires a running browser-api server (start with: uv run browser-api).
 """
 
 from __future__ import annotations
@@ -9,12 +10,14 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
-
+from chrome_scraper.browser_api.client import BrowserAPIClient
 from chrome_scraper.cli_output import emit_error
+from chrome_scraper.web_scrapers.base import WebScraperError
+from chrome_scraper.web_scrapers.url_dispatch import render_url_as_markdown
 
 
 _DEFAULT_OUT_DIR = Path("data/sources")
@@ -37,8 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="url-to-md",
         description=(
-            "Render a URL as markdown via browser-api's /get-page-as-md endpoint. "
-            "Requires a running browser-api server (uv run browser-api)."
+            "Render a URL as markdown via browser-api, using custom site handlers "
+            "automatically when available. Requires a running browser-api server "
+            "(uv run browser-api)."
         ),
     )
     p.add_argument("url", help="URL to render.")
@@ -67,38 +71,29 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    body = {"url": args.url, "timeout": args.timeout, "scroll": not args.no_scroll}
+    browser = BrowserAPIClient(base_url=args.browser_api, timeout=args.timeout + 5)
+    tab_label = f"url-to-md-{uuid.uuid4().hex[:8]}"
 
     try:
-        r = httpx.post(
-            f"{args.browser_api.rstrip('/')}/get-page-as-md",
-            json=body,
-            timeout=args.timeout + 5,
-        )
-        r.raise_for_status()
-    except httpx.ConnectError:
-        emit_error(
-            f"Cannot connect to browser-api at {args.browser_api}. "
-            "Start it with: uv run browser-api"
-        )
+        with browser.tab(tab_label):
+            rendered = render_url_as_markdown(
+                browser=browser,
+                tab_ref=tab_label,
+                url=args.url,
+                timeout=args.timeout,
+                scroll=not args.no_scroll,
+            )
+    except WebScraperError as exc:
+        emit_error(str(exc))
         return 1
-    except httpx.HTTPStatusError as exc:
-        emit_error(f"browser-api error: {exc.response.text}")
-        return 1
-    except httpx.TimeoutException:
-        emit_error("Request timed out.")
-        return 1
-
-    md = r.text
-    title = r.headers.get("x-page-title", "")
 
     if args.output == "-":
-        sys.stdout.write(md)
+        sys.stdout.write(rendered.markdown)
     else:
-        slug = _slug_from_title(title, args.url)
+        slug = _slug_from_title(rendered.title, args.url)
         out_path = Path(args.output) if args.output else _DEFAULT_OUT_DIR / f"{slug}.md"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(md, encoding="utf-8")
+        out_path.write_text(rendered.markdown, encoding="utf-8")
         print(f"wrote {out_path} ({out_path.stat().st_size} bytes)", file=sys.stderr)
 
     return 0

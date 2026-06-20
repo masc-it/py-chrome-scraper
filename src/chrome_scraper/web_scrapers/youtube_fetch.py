@@ -21,14 +21,14 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
-from typing import Any
-
 from chrome_scraper.web_scrapers._fetch_common import dump_html_and_md
 from chrome_scraper.web_scrapers.base import (
     BrowserTool,
     WebScraperError,
+    get_href,
     wait_for,
 )
+from chrome_scraper.web_scrapers.url_page import PreparedPage
 
 
 # ── JS snippets ──────────────────────────────────────────────────────────
@@ -147,27 +147,74 @@ _EXTRACT_TRANSCRIPT_JS = """
 """
 
 
-# ── Public plugin interface (consumed by google_fetch.py) ─────────────────
+# ── URL-dispatch preparer + legacy file fetcher ──────────────────────────
+
+
+def prepare_video_page(
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    *,
+    timeout: float,
+    poll_interval: float,
+    require_transcript: bool = False,
+) -> PreparedPage:
+    """Prepare a YouTube watch page for generic markdown extraction.
+
+    The dispatcher uses this in best-effort mode: description expansion always
+    runs, and transcript markdown is prepended when YouTube exposes a transcript
+    button.  ``yt-fetch`` and the google-fetch file adapter pass
+    ``require_transcript=True`` to preserve their transcript-oriented behavior.
+    """
+    transcript_opened = _expand_and_open_transcript(
+        browser,
+        tab_ref,
+        url,
+        timeout,
+        poll_interval,
+        require_transcript=require_transcript,
+    )
+    transcript_md = (
+        _extract_transcript_md(browser, tab_ref, timeout) if transcript_opened else ""
+    )
+
+    return PreparedPage(
+        requested_url=url,
+        page_url=get_href(browser, tab_ref, timeout) or url,
+        title=_read_video_title(browser, tab_ref, timeout),
+        markdown_prefix=transcript_md,
+        handler_name="youtube",
+    )
 
 
 def fetch_post_url(
-    browser: BrowserTool, tab_ref: str,
-    url: str, title: str, position: int, html_path: Path,
-    timeout: float, poll_interval: float,
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    title: str,
+    position: int,
+    html_path: Path,
+    timeout: float,
+    poll_interval: float,
 ) -> None:
-    """Fetch a YouTube video page — expand description, open transcript, dump.
-
-    Signature matches ``FetchHandler`` in ``google_fetch.py``.
-    """
-    _expand_and_open_transcript(browser, tab_ref, url, timeout, poll_interval)
-
-    transcript_md = _extract_transcript_md(browser, tab_ref, timeout)
+    """Fetch a YouTube video page — expand description, open transcript, dump."""
+    prepared = prepare_video_page(
+        browser,
+        tab_ref,
+        url,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        require_transcript=True,
+    )
 
     frontmatter = f"---\ntitle: {title!r}\nurl: {url}\nposition: {position}\n---\n\n"
 
     dump_html_and_md(
-        browser=browser, tab_ref=tab_ref,
-        url=url, md_body=frontmatter + transcript_md, html_path=html_path,
+        browser=browser,
+        tab_ref=tab_ref,
+        url=prepared.page_url,
+        md_body=frontmatter + prepared.markdown_prefix,
+        html_path=html_path,
         timeout=timeout,
     )
 
@@ -176,35 +223,57 @@ def fetch_post_url(
 
 
 def _expand_and_open_transcript(
-    browser: BrowserTool, tab_ref: str,
-    url: str, timeout: float, poll_interval: float,
-) -> None:
-    """Navigate to a YouTube video, expand description, open transcript panel,
-    and scroll the transcript content to ensure it's fully rendered."""
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    timeout: float,
+    poll_interval: float,
+    *,
+    require_transcript: bool = True,
+) -> bool:
+    """Navigate, expand description, and open the transcript panel if present."""
     browser.navigate(tab_ref=tab_ref, url=url, timeout=timeout, wait_until="load")
     time.sleep(3)  # let the SPA hydrate
 
-    # Step 1: expand the description
+    # Step 1: expand the description.
     browser.eval_js(tab_ref=tab_ref, expression=_EXPAND_DESCRIPTION_JS, timeout=timeout)
     time.sleep(0.5)
 
-    # Step 2: click "Show transcript"
-    browser.eval_js(tab_ref=tab_ref, expression=_SHOW_TRANSCRIPT_JS, timeout=timeout)
-
-    # Step 3: wait for a visible panel with content and no active spinner
-    wait_for(
-        timeout=timeout,
-        poll_interval=poll_interval,
-        task=lambda: _transcript_panel_ready(browser, tab_ref, timeout),
-        error_message="Transcript panel never loaded",
+    # Step 2: click "Show transcript" when available.
+    transcript_clicked = bool(
+        browser.eval_js(
+            tab_ref=tab_ref, expression=_SHOW_TRANSCRIPT_JS, timeout=timeout
+        )
     )
+    if not transcript_clicked:
+        if require_transcript:
+            raise WebScraperError("Transcript button not found")
+        return False
+
+    # Step 3: wait for a visible panel with content and no active spinner.
+    try:
+        wait_for(
+            timeout=timeout,
+            poll_interval=poll_interval,
+            task=lambda: _transcript_panel_ready(browser, tab_ref, timeout),
+            error_message="Transcript panel never loaded",
+        )
+    except WebScraperError:
+        if require_transcript:
+            raise
+        return False
+    return True
 
 
 def _transcript_panel_ready(browser: BrowserTool, tab_ref: str, timeout: float) -> bool:
     try:
-        return bool(browser.eval_js(
-            tab_ref=tab_ref, expression=_TRANSCRIPT_READY_JS, timeout=timeout,
-        ))
+        return bool(
+            browser.eval_js(
+                tab_ref=tab_ref,
+                expression=_TRANSCRIPT_READY_JS,
+                timeout=timeout,
+            )
+        )
     except WebScraperError:
         return False
 
@@ -213,7 +282,9 @@ def _extract_transcript_md(browser: BrowserTool, tab_ref: str, timeout: float) -
     """Extract transcript segments via JS and return as a markdown section."""
     try:
         segments = browser.eval_js(
-            tab_ref=tab_ref, expression=_EXTRACT_TRANSCRIPT_JS, timeout=timeout,
+            tab_ref=tab_ref,
+            expression=_EXTRACT_TRANSCRIPT_JS,
+            timeout=timeout,
         )
     except WebScraperError:
         return ""
@@ -232,6 +303,21 @@ def _extract_transcript_md(browser: BrowserTool, tab_ref: str, timeout: float) -
             lines.append(f"{text}\n")
     lines.append("")
     return "\n".join(lines)
+
+
+def _read_video_title(browser: BrowserTool, tab_ref: str, timeout: float) -> str:
+    try:
+        title = browser.eval_js(
+            tab_ref=tab_ref,
+            expression=(
+                "document.querySelector('h1 yt-formatted-string')?.textContent "
+                "|| document.title || ''"
+            ),
+            timeout=timeout,
+        )
+    except WebScraperError:
+        return ""
+    return title.strip() if isinstance(title, str) else ""
 
 
 # ── Full fetch_query (consumed by yt-fetch CLI) ──────────────────────────
@@ -256,28 +342,26 @@ def fetch_video(
     video_id = m.group(1) if m else "video"
     html_path = out_dir / f"{video_id}.html"
 
-    _expand_and_open_transcript(browser, tab_ref, url, timeout, poll_interval)
-
-    transcript_md = _extract_transcript_md(browser, tab_ref, timeout)
-
-    title = ""
-    try:
-        title = browser.eval_js(
-            tab_ref=tab_ref,
-            expression="document.querySelector('h1 yt-formatted-string')?.textContent || ''",
-            timeout=timeout,
-        ) or ""
-    except WebScraperError:
-        pass
+    prepared = prepare_video_page(
+        browser,
+        tab_ref,
+        url,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        require_transcript=True,
+    )
 
     md_body = (
-        f"---\nurl: {url}\nvideo_id: {video_id}\ntitle: {title!r}\n---\n\n"
-        + transcript_md
+        f"---\nurl: {url}\nvideo_id: {video_id}\ntitle: {prepared.title!r}\n---\n\n"
+        + prepared.markdown_prefix
     )
 
     dump_html_and_md(
-        browser=browser, tab_ref=tab_ref,
-        url=url, md_body=md_body, html_path=html_path,
+        browser=browser,
+        tab_ref=tab_ref,
+        url=prepared.page_url,
+        md_body=md_body,
+        html_path=html_path,
         timeout=timeout,
     )
 

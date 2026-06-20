@@ -53,11 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     m = re.search(r"(?:v=|/shorts/|youtu\.be/)([a-zA-Z0-9_-]{11})", args.url)
     video_id = m.group(1) if m else "video"
 
-    out_dir = (
-        Path(args.out_dir)
-        if args.out_dir
-        else _DEFAULT_OUT_ROOT / video_id
-    )
+    out_dir = Path(args.out_dir) if args.out_dir else _DEFAULT_OUT_ROOT / video_id
     browser = BrowserAPIClient(base_url=args.browser_api, timeout=args.timeout)
 
     tab_label = f"yt-{video_id}"

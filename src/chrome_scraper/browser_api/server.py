@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from chrome_scraper.html_to_md.extract import _EXTRACT_JS, _SCROLL_JS
@@ -85,7 +86,6 @@ class StatusResponse(BaseModel):
 _CHROME_VERSION_RE = re.compile(r"Chrome/(\d+\.\d+\.\d+\.\d+)")
 
 
-
 @dataclass
 class TabEntry:
     page: Any  # patchright async Page
@@ -122,7 +122,6 @@ def _unregister_tab(tab_id: str) -> None:
         _LABELS.pop(entry.label, None)
 
 
-
 @dataclass
 class BrowserState:
     playwright: Any = None
@@ -135,7 +134,6 @@ class BrowserState:
 
 
 _STATE = BrowserState()
-
 
 
 @asynccontextmanager
@@ -222,7 +220,6 @@ async def lifespan(app: FastAPI):
         pass
     _TABS.clear()
     _LABELS.clear()
-
 
 
 @dataclass
@@ -356,6 +353,23 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=f"eval failed: {exc}")
         return {"result": result}
 
+    @app.get("/tabs/{tab_ref}/html")
+    async def get_html(tab_ref: str):
+        _, page = _resolve_tab(tab_ref)
+        try:
+            html = await page.evaluate("document.documentElement.outerHTML")
+            title = await _safe_title(page)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"html failed: {exc}")
+        return PlainTextResponse(
+            content=html or "",
+            media_type="text/html",
+            headers={
+                "X-Page-Title": title,
+                "X-Page-Url": page.url,
+            },
+        )
+
     @app.post("/tabs/{tab_ref}/back")
     async def back(tab_ref: str):
         _, page = _resolve_tab(tab_ref)
@@ -426,8 +440,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             if title:
                 md = f"# {title}\n\n{md}"
 
-            from fastapi.responses import PlainTextResponse
-
             return PlainTextResponse(
                 content=md,
                 media_type="text/plain",
@@ -448,7 +460,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 pass
 
     return app
-
 
 
 def _require_context():
@@ -515,4 +526,6 @@ def _default_profile() -> Path:
         )
     if state_home := os.environ.get("XDG_STATE_HOME"):
         return Path(state_home) / "chrome_scraper" / "playwright" / "profile"
-    return Path.home() / ".local" / "state" / "chrome_scraper" / "playwright" / "profile"
+    return (
+        Path.home() / ".local" / "state" / "chrome_scraper" / "playwright" / "profile"
+    )

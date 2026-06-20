@@ -81,8 +81,7 @@ def extract_page(
             if verbose:
                 print(f"scroll warning: {exc}", file=sys.stderr)
     payload = (
-        browser.eval_js(tab_ref=tab_ref, expression=_EXTRACT_JS, timeout=timeout)
-        or {}
+        browser.eval_js(tab_ref=tab_ref, expression=_EXTRACT_JS, timeout=timeout) or {}
     )
     return payload
 
@@ -107,11 +106,21 @@ def extract_from_url(
     """
     if browser is not None:
         return extract_page(
-            url, browser, tab_ref=tab_label, timeout=timeout, scroll=scroll, verbose=verbose
+            url,
+            browser,
+            tab_ref=tab_label,
+            timeout=timeout,
+            scroll=scroll,
+            verbose=verbose,
         )
 
     client = BrowserAPIClient(base_url=browser_api_url, timeout=timeout)
     with client.tab(tab_label):
         return extract_page(
-            url, client, tab_ref=tab_label, timeout=timeout, scroll=scroll, verbose=verbose
+            url,
+            client,
+            tab_ref=tab_label,
+            timeout=timeout,
+            scroll=scroll,
+            verbose=verbose,
         )

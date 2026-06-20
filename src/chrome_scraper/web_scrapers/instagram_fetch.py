@@ -31,9 +31,11 @@ from chrome_scraper.web_scrapers._fetch_common import dump_html_and_md
 from chrome_scraper.web_scrapers.base import (
     BrowserTool,
     WebScraperError,
+    get_href,
     save_index,
     wait_for,
 )
+from chrome_scraper.web_scrapers.url_page import PreparedPage
 
 _BASE = "https://www.instagram.com"
 _SEARCH_URL = f"{_BASE}/explore/search/keyword/?q="
@@ -57,36 +59,65 @@ class FetchedPost(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-# Public plugin interface (consumed by google_fetch.py)
+# URL-dispatch preparer + legacy file fetcher
 # ---------------------------------------------------------------------------
 
 
-def fetch_post_url(
-    browser: BrowserTool, tab_ref: str,
-    url: str, title: str, position: int, html_path: Path,
-    timeout: float, poll_interval: float,
-) -> None:
-    """Fetch a single Instagram post/reel URL.
-
-    Signature matches ``FetchHandler`` in ``google_fetch.py`` so it can
-    be registered as a site-specific override for ``www.instagram.com``.
-    """
+def prepare_post_page(
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    *,
+    timeout: float,
+    poll_interval: float,
+) -> PreparedPage:
+    """Prepare a single Instagram post/reel URL for markdown extraction."""
     clean_url = _normalise_url(url)
 
     browser.navigate(tab_ref=tab_ref, url=clean_url, timeout=timeout, wait_until="load")
 
     wait_for(
-        timeout=timeout, poll_interval=poll_interval,
+        timeout=timeout,
+        poll_interval=poll_interval,
         task=lambda: _post_rendered(browser, tab_ref, timeout),
         error_message=f"Instagram page never rendered for {clean_url}",
     )
     time.sleep(1.0)  # let images / carousels paint
 
+    return PreparedPage(
+        requested_url=url,
+        page_url=get_href(browser, tab_ref, timeout) or clean_url,
+        title=_read_page_title(browser, tab_ref, timeout),
+        handler_name="instagram",
+    )
+
+
+def fetch_post_url(
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    title: str,
+    position: int,
+    html_path: Path,
+    timeout: float,
+    poll_interval: float,
+) -> None:
+    """Fetch a single Instagram post/reel URL and write HTML + markdown."""
+    prepared = prepare_post_page(
+        browser,
+        tab_ref,
+        url,
+        timeout=timeout,
+        poll_interval=poll_interval,
+    )
     frontmatter = f"---\ntitle: {title!r}\nurl: {url}\nposition: {position}\n---\n\n"
 
     dump_html_and_md(
-        browser=browser, tab_ref=tab_ref,
-        url=clean_url, md_body=frontmatter, html_path=html_path,
+        browser=browser,
+        tab_ref=tab_ref,
+        url=prepared.page_url,
+        md_body=frontmatter,
+        html_path=html_path,
         timeout=timeout,
     )
 
@@ -100,6 +131,18 @@ def _normalise_url(url: str) -> str:
     if m:
         return f"{_BASE}/{m.group(1)}/{m.group(2)}/"
     return url
+
+
+def _read_page_title(browser: BrowserTool, tab_ref: str, timeout: float) -> str:
+    try:
+        title = browser.eval_js(
+            tab_ref=tab_ref,
+            expression="document.title || document.querySelector('h1')?.textContent || ''",
+            timeout=timeout,
+        )
+    except WebScraperError:
+        return ""
+    return title.strip() if isinstance(title, str) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -144,25 +187,35 @@ def fetch_query(
         save_index(posts, out_dir / "results.json")
     elif profile:
         posts = _collect_grid(
-            browser=browser, tab_ref=tab_ref,
+            browser=browser,
+            tab_ref=tab_ref,
             url=f"{_BASE}/{profile}/",
-            timeout=timeout, poll_interval=poll_interval, max_results=max_results,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            max_results=max_results,
         )
         save_index(posts, out_dir / "results.json")
     elif hashtag:
         posts = _collect_grid(
-            browser=browser, tab_ref=tab_ref,
+            browser=browser,
+            tab_ref=tab_ref,
             url=f"{_TAGS_URL}{hashtag}/",
-            timeout=timeout, poll_interval=poll_interval, max_results=max_results,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            max_results=max_results,
         )
         save_index(posts, out_dir / "results.json")
     else:
         import urllib.parse
+
         search_url = _SEARCH_URL + urllib.parse.quote(query)
         posts = _collect_grid(
-            browser=browser, tab_ref=tab_ref,
+            browser=browser,
+            tab_ref=tab_ref,
             url=search_url,
-            timeout=timeout, poll_interval=poll_interval, max_results=max_results,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            max_results=max_results,
         )
         save_index(posts, out_dir / "results.json")
 
@@ -182,19 +235,25 @@ def fetch_query(
         html_path = out_dir / f"{i:02d}-{_slug_from_post(post)}.html"
         try:
             _fetch_one(
-                browser=browser, tab_ref=tab_ref,
-                post=post, position=i, html_path=html_path,
-                timeout=timeout, poll_interval=poll_interval,
+                browser=browser,
+                tab_ref=tab_ref,
+                post=post,
+                position=i,
+                html_path=html_path,
+                timeout=timeout,
+                poll_interval=poll_interval,
             )
-            fetched.append({
-                "permalink": permalink,
-                "shortcode": post.get("shortcode", ""),
-                "type": post.get("type", "p"),
-                "caption": post.get("caption", ""),
-                "username": post.get("username", ""),
-                "html_file": str(html_path),
-                "md_file": str(html_path.with_suffix(".md")),
-            })
+            fetched.append(
+                {
+                    "permalink": permalink,
+                    "shortcode": post.get("shortcode", ""),
+                    "type": post.get("type", "p"),
+                    "caption": post.get("caption", ""),
+                    "username": post.get("username", ""),
+                    "html_file": str(html_path),
+                    "md_file": str(html_path.with_suffix(".md")),
+                }
+            )
         except WebScraperError as exc:
             print(f"[insta-fetch] skip {permalink}: {exc}", file=sys.stderr, flush=True)
 
@@ -212,27 +271,43 @@ def _resolve_single_post(post_url: str) -> list[dict[str, Any]]:
         raise WebScraperError(f"Not a valid Instagram post/reel URL: {post_url}")
     ptype, code = m.group(1), m.group(2)
     permalink = f"{_BASE}/{ptype}/{code}/"
-    return [{"type": ptype, "shortcode": code, "permalink": permalink, "username": "", "caption": ""}]
+    return [
+        {
+            "type": ptype,
+            "shortcode": code,
+            "permalink": permalink,
+            "username": "",
+            "caption": "",
+        }
+    ]
 
 
 def _collect_grid(
     *,
-    browser: BrowserTool, tab_ref: str, url: str,
-    timeout: float, poll_interval: float, max_results: int,
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    timeout: float,
+    poll_interval: float,
+    max_results: int,
 ) -> list[dict[str, Any]]:
     browser.navigate(tab_ref=tab_ref, url=url, timeout=timeout, wait_until="load")
     time.sleep(2.0)
     _check_login_wall(browser, tab_ref, timeout)
     _scroll_for_posts(browser, tab_ref, timeout=timeout, target=max_results)
-    raw = browser.eval_js(tab_ref=tab_ref, expression=_RESULTS_JS, timeout=timeout) or []
+    raw = (
+        browser.eval_js(tab_ref=tab_ref, expression=_RESULTS_JS, timeout=timeout) or []
+    )
     return [p for p in raw if isinstance(p, dict) and p.get("permalink")][:max_results]
 
 
-def _scroll_for_posts(browser: BrowserTool, tab_ref: str, *, timeout: float, target: int) -> None:
+def _scroll_for_posts(
+    browser: BrowserTool, tab_ref: str, *, timeout: float, target: int
+) -> None:
     for _ in range(10):
         count = browser.eval_js(
             tab_ref=tab_ref,
-            expression="document.querySelectorAll('a[href*=\"/p/\"], a[href*=\"/reel/\"]').length",
+            expression='document.querySelectorAll(\'a[href*="/p/"], a[href*="/reel/"]\').length',
             timeout=timeout,
         )
         if isinstance(count, int) and count >= target:
@@ -247,16 +322,21 @@ def _scroll_for_posts(browser: BrowserTool, tab_ref: str, *, timeout: float, tar
 
 def _fetch_one(
     *,
-    browser: BrowserTool, tab_ref: str,
-    post: dict[str, Any], position: int, html_path: Path,
-    timeout: float, poll_interval: float,
+    browser: BrowserTool,
+    tab_ref: str,
+    post: dict[str, Any],
+    position: int,
+    html_path: Path,
+    timeout: float,
+    poll_interval: float,
 ) -> None:
     permalink = post["permalink"]
 
     browser.navigate(tab_ref=tab_ref, url=permalink, timeout=timeout, wait_until="load")
 
     wait_for(
-        timeout=timeout, poll_interval=poll_interval,
+        timeout=timeout,
+        poll_interval=poll_interval,
         task=lambda: _post_rendered(browser, tab_ref, timeout),
         error_message=f"Post never rendered for {permalink}",
     )
@@ -264,8 +344,12 @@ def _fetch_one(
 
     md_body = _frontmatter(post, position)
     dump_html_and_md(
-        browser=browser, tab_ref=tab_ref, url=permalink,
-        md_body=md_body, html_path=html_path, timeout=timeout,
+        browser=browser,
+        tab_ref=tab_ref,
+        url=permalink,
+        md_body=md_body,
+        html_path=html_path,
+        timeout=timeout,
     )
 
 
@@ -274,7 +358,7 @@ def _post_rendered(browser: BrowserTool, tab_ref: str, timeout: float) -> bool:
         result = browser.eval_js(
             tab_ref=tab_ref,
             expression=(
-                "!!document.querySelector('img[alt*=\"Photo\" i], img[alt*=\"Video\" i]') "
+                '!!document.querySelector(\'img[alt*="Photo" i], img[alt*="Video" i]\') '
                 "|| !!document.querySelector('main') "
                 "|| !!document.querySelector('[role=\"main\"]')"
             ),
@@ -299,7 +383,8 @@ def _check_login_wall(browser: BrowserTool, tab_ref: str, timeout: float) -> Non
                 "  uv run browser-api  # no --headless\n"
                 "  then visit https://www.instagram.com and log in.\n"
                 "  Cookies persist in the profile for future runs.",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
             raise WebScraperError("Login required")
     except WebScraperError:

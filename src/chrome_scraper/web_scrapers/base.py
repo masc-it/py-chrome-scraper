@@ -6,7 +6,7 @@ import random
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypedDict, TypeVar
+from typing import Any, Callable, Protocol, TypedDict
 
 
 class WebScraperError(RuntimeError):
@@ -54,7 +54,9 @@ async def probe_chrome_identity_async(
     pw: Any, *, channel: str, chrome_path: str | None
 ) -> str:
     """Launch throwaway headless Chromium to read real UA (async)."""
-    browser = await pw.chromium.launch(**_build_headless_launch_kwargs(channel, chrome_path))
+    browser = await pw.chromium.launch(
+        **_build_headless_launch_kwargs(channel, chrome_path)
+    )
     try:
         page = await browser.new_page()
         ua = await page.evaluate("navigator.userAgent")
@@ -84,7 +86,9 @@ def wait_for(
             return last_value
         time.sleep(poll_interval)
     raise WebScraperError(
-        error_message if last_value is None else f"{error_message} Last value: {last_value!r}"
+        error_message
+        if last_value is None
+        else f"{error_message} Last value: {last_value!r}"
     )
 
 
@@ -118,8 +122,13 @@ class ScrapedDocument(TypedDict):
 
 
 class BrowserTool(Protocol):
-    def attach(self, *, port: int | None = None, user_data_dir: str | None = None, timeout: float) -> dict[str, Any]:
-        ...
+    def attach(
+        self,
+        *,
+        port: int | None = None,
+        user_data_dir: str | None = None,
+        timeout: float,
+    ) -> dict[str, Any]: ...
 
     def launch(
         self,
@@ -129,29 +138,29 @@ class BrowserTool(Protocol):
         chrome_path: str | None = None,
         headless: bool = False,
         timeout: float,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
-    def stop(self, *, timeout: float = 5.0) -> dict[str, Any]:
-        ...
+    def stop(self, *, timeout: float = 5.0) -> dict[str, Any]: ...
 
-    def list_tabs(self) -> list[BrowserTab]:
-        ...
+    def list_tabs(self) -> list[BrowserTab]: ...
 
-    def open_tab(self, url: str = "about:blank", *, label: str | None = None) -> BrowserTab:
-        ...
+    def open_tab(
+        self, url: str = "about:blank", *, label: str | None = None
+    ) -> BrowserTab: ...
 
-    def activate_tab(self, tab_ref: str) -> dict[str, Any]:
-        ...
+    def activate_tab(self, tab_ref: str) -> dict[str, Any]: ...
 
-    def navigate(self, *, tab_ref: str, url: str, timeout: float, wait_until: str = "load") -> dict[str, Any]:
-        ...
+    def navigate(
+        self, *, tab_ref: str, url: str, timeout: float, wait_until: str = "load"
+    ) -> dict[str, Any]: ...
 
-    def eval_js(self, *, tab_ref: str, expression: str, timeout: float) -> Any:
-        ...
+    def eval_js(self, *, tab_ref: str, expression: str, timeout: float) -> Any: ...
 
-    def eval_js_file(self, *, tab_ref: str, script_path: str, timeout: float) -> Any:
-        ...
+    def eval_js_file(
+        self, *, tab_ref: str, script_path: str, timeout: float
+    ) -> Any: ...
+
+    def html(self, *, tab_ref: str, timeout: float) -> str: ...
 
 
 class WebScraper(ABC):
@@ -212,7 +221,9 @@ class WebScraper(ABC):
         return results
 
     @abstractmethod
-    def open_start_page(self, *, browser: BrowserTool, tab_ref: str, timeout: float) -> None:
+    def open_start_page(
+        self, *, browser: BrowserTool, tab_ref: str, timeout: float
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod

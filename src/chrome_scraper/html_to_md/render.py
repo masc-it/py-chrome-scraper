@@ -13,8 +13,6 @@ import sys
 from collections import defaultdict
 
 
-
-
 def detect_widest_gutter(
     items: list[dict],
     page_width: float,
@@ -102,7 +100,9 @@ def detect_column_starts(
         bucket_to_ys[int(it["x"] / bucket)].add(int(it["y"] / y_bucket))
     min_count = max(5, int(len(content) * 0.02))
     peaks = sorted(
-        k for k, ys_set in bucket_to_ys.items() if len(ys_set) >= min(min_y_spread, min_count)
+        k
+        for k, ys_set in bucket_to_ys.items()
+        if len(ys_set) >= min(min_y_spread, min_count)
     )
     if not peaks:
         return [0.0]
@@ -153,8 +153,6 @@ def assign_columns(items: list[dict], col_starts: list[float]) -> None:
             it["col"] = pre_col[pre_id]
         else:
             it["col"] = assign_item_column(it, col_starts)
-
-
 
 
 def _merge_y_intervals(items: list[dict]) -> list[tuple[float, float]]:
@@ -246,9 +244,9 @@ def assign_row(y: float, bounds: list[float]) -> int:
     return bisect.bisect_right(bounds, y) - 1
 
 
-
-
-def group_into_lines(items: list[dict], *, y_tolerance_ratio: float = 0.55) -> list[list[dict]]:
+def group_into_lines(
+    items: list[dict], *, y_tolerance_ratio: float = 0.55
+) -> list[list[dict]]:
     if not items:
         return []
     heights = sorted(max(it["h"], 1.0) for it in items)
@@ -262,7 +260,11 @@ def group_into_lines(items: list[dict], *, y_tolerance_ratio: float = 0.55) -> l
         c = it["y"] + it["h"] / 2
         if cur_center is None or abs(c - cur_center) <= tol:
             cur.append(it)
-            cur_center = c if cur_center is None else (cur_center * (len(cur) - 1) + c) / len(cur)
+            cur_center = (
+                c
+                if cur_center is None
+                else (cur_center * (len(cur) - 1) + c) / len(cur)
+            )
         else:
             lines.append(sorted(cur, key=lambda x: x["x"]))
             cur = [it]
@@ -272,13 +274,16 @@ def group_into_lines(items: list[dict], *, y_tolerance_ratio: float = 0.55) -> l
     return lines
 
 
-
-
 def _coalesce_same_href(line: list[dict]) -> list[dict]:
     """Merge adjacent items sharing the same non-empty href into one item."""
     out: list[dict] = []
     for it in line:
-        if out and it.get("href") and out[-1].get("href") == it["href"] and not it.get("is_code"):
+        if (
+            out
+            and it.get("href")
+            and out[-1].get("href") == it["href"]
+            and not it.get("is_code")
+        ):
             merged = dict(out[-1])
             merged["text"] = f"{merged['text']} {it['text']}"
             merged["w"] = (it["x"] + it["w"]) - merged["x"]
@@ -326,7 +331,9 @@ def render_code_block(block_lines: list[list[dict]], lang: str) -> str:
     if not all_items:
         return ""
     x_origin = min(it["x"] for it in all_items)
-    widths = [it["w"] / max(len(it["text"]), 1) for it in all_items if it["text"].strip()]
+    widths = [
+        it["w"] / max(len(it["text"]), 1) for it in all_items if it["text"].strip()
+    ]
     char_w = sorted(widths)[len(widths) // 2] if widths else 8.0
     char_w = max(char_w, 4.0)
 
@@ -370,7 +377,9 @@ def render_column(lines: list[list[dict]]) -> str:
         pre_ids = {it.get("pre_id") for it in line}
         if len(pre_ids) == 1 and None not in pre_ids:
             pre_id = next(iter(pre_ids))
-            lang = next((it.get("pre_lang", "") for it in line if it.get("pre_lang")), "")
+            lang = next(
+                (it.get("pre_lang", "") for it in line if it.get("pre_lang")), ""
+            )
             block = [line]
             j = i + 1
             while j < len(lines):

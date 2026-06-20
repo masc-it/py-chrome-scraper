@@ -107,6 +107,9 @@ class BrowserAPIClient:
         script = Path(script_path).expanduser().read_text(encoding="utf-8")
         return self.eval_js(tab_ref=tab_ref, expression=script, timeout=timeout)
 
+    def html(self, *, tab_ref: str, timeout: float) -> str:
+        return self._get_text(f"/tabs/{tab_ref}/html", timeout=timeout)
+
     def keyboard_type(self, *, tab_ref: str, text: str, delay_ms: int = 30) -> None:
         self._post(f"/tabs/{tab_ref}/type", json={"text": text, "delay_ms": delay_ms})
 
@@ -141,20 +144,38 @@ class BrowserAPIClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         """Dispatch an HTTP request and handle common errors."""
+        r = self._send(method, path, **kwargs)
+        return r.json()
+
+    def _request_text(self, method: str, path: str, **kwargs: Any) -> str:
+        r = self._send(method, path, **kwargs)
+        return r.text
+
+    def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             r = getattr(self._http, method)(path, **kwargs)
             r.raise_for_status()
-            return r.json()
-        except httpx.ConnectError:
+            return r
+        except httpx.ConnectError as exc:
             raise WebScraperError(
                 f"Cannot connect to browser-api at {self.base_url}. "
                 "Start it with: uv run browser-api"
-            )
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise WebScraperError(f"browser-api request timed out: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise WebScraperError(f"browser-api error: {exc.response.text}")
+            raise WebScraperError(f"browser-api error: {exc.response.text}") from exc
+        except httpx.RequestError as exc:
+            raise WebScraperError(f"browser-api request failed: {exc}") from exc
 
     def _get(self, path: str) -> Any:
         return self._request("get", path)
+
+    def _get_text(self, path: str, *, timeout: float | None = None) -> str:
+        kw: dict[str, Any] = {}
+        if timeout is not None:
+            kw["timeout"] = timeout
+        return self._request_text("get", path, **kw)
 
     def _post(
         self, path: str, *, json: dict | None = None, timeout: float | None = None

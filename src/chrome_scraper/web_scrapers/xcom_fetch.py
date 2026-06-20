@@ -29,6 +29,7 @@ from chrome_scraper.web_scrapers.base import (
     save_index,
     wait_for,
 )
+from chrome_scraper.web_scrapers.url_page import PreparedPage
 
 SEARCH_INPUT_SELECTOR = 'input[data-testid="SearchBox_Search_Input"]'
 EXPLORE_URL = "https://x.com/explore"
@@ -91,6 +92,11 @@ _FIND_QUOTED_JS = r"""
 }
 """
 
+_TWEET_ARTICLE_READY_JS = (
+    "!!document.querySelector('article [data-testid=\"tweetText\"]') "
+    "|| !!document.querySelector('article')"
+)
+
 
 class FetchedTweet(TypedDict):
     permalink: str
@@ -100,18 +106,62 @@ class FetchedTweet(TypedDict):
     md_file: str
 
 
-# ── Public plugin interface (consumed by google_fetch.py) ─────────────────
+# ── URL-dispatch preparer + legacy file fetcher ──────────────────────────
+
+
+def prepare_post_page(
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    *,
+    timeout: float,
+    poll_interval: float,
+) -> PreparedPage:
+    """Prepare a single X.com tweet URL for markdown extraction."""
+    permalink = _normalise_url(url)
+    browser.navigate(tab_ref=tab_ref, url=permalink, timeout=timeout, wait_until="load")
+
+    wait_for(
+        timeout=timeout,
+        poll_interval=poll_interval,
+        task=lambda: browser.eval_js(
+            tab_ref=tab_ref,
+            expression=_TWEET_ARTICLE_READY_JS,
+            timeout=timeout,
+        ),
+        error_message=f"Tweet article never rendered for {permalink}",
+    )
+    time.sleep(0.5)
+
+    return PreparedPage(
+        requested_url=url,
+        page_url=get_href(browser, tab_ref, timeout) or permalink,
+        title=_read_page_title(browser, tab_ref, timeout),
+        handler_name="xcom",
+    )
 
 
 def fetch_post_url(
-    browser: BrowserTool, tab_ref: str,
-    url: str, title: str, position: int, html_path: Path,
-    timeout: float, poll_interval: float,
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    title: str,
+    position: int,
+    html_path: Path,
+    timeout: float,
+    poll_interval: float,
 ) -> None:
     """Fetch a single X.com tweet, including any quoted tweet inside."""
     _fetch_tweet_and_quoted(
-        browser, tab_ref, url, title, position, html_path,
-        timeout, poll_interval, is_standalone=False,
+        browser,
+        tab_ref,
+        url,
+        title,
+        position,
+        html_path,
+        timeout,
+        poll_interval,
+        is_standalone=False,
     )
 
 
@@ -143,13 +193,21 @@ def fetch_query(
         tab_ref=tab_ref, url=EXPLORE_URL, timeout=timeout, wait_until="load"
     )
     _submit_search(
-        browser, tab_ref, full_query, timeout=timeout, poll_interval=poll_interval,
+        browser,
+        tab_ref,
+        full_query,
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
 
     _scroll_for_tweets(browser, tab_ref, timeout=timeout, target=max_results)
 
-    raw = browser.eval_js(tab_ref=tab_ref, expression=_RESULTS_JS, timeout=timeout) or []
-    tweets = [t for t in raw if isinstance(t, dict) and t.get("permalink")][:max_results]
+    raw = (
+        browser.eval_js(tab_ref=tab_ref, expression=_RESULTS_JS, timeout=timeout) or []
+    )
+    tweets = [t for t in raw if isinstance(t, dict) and t.get("permalink")][
+        :max_results
+    ]
     if not tweets:
         raise WebScraperError(f"No tweets found for query: {full_query!r}")
 
@@ -166,17 +224,23 @@ def fetch_query(
         html_path = out_dir / f"{i:02d}-{_slug_from_tweet(tweet)}.html"
         try:
             _fetch_one(
-                browser=browser, tab_ref=tab_ref,
-                tweet=tweet, position=i, html_path=html_path,
-                timeout=timeout, poll_interval=poll_interval,
+                browser=browser,
+                tab_ref=tab_ref,
+                tweet=tweet,
+                position=i,
+                html_path=html_path,
+                timeout=timeout,
+                poll_interval=poll_interval,
             )
-            fetched.append({
-                "permalink": permalink,
-                "author": tweet.get("author", ""),
-                "text": tweet.get("text", ""),
-                "html_file": str(html_path),
-                "md_file": str(html_path.with_suffix(".md")),
-            })
+            fetched.append(
+                {
+                    "permalink": permalink,
+                    "author": tweet.get("author", ""),
+                    "text": tweet.get("text", ""),
+                    "html_file": str(html_path),
+                    "md_file": str(html_path.with_suffix(".md")),
+                }
+            )
         except WebScraperError as exc:
             print(f"[xcom-fetch] skip {permalink}: {exc}", file=sys.stderr, flush=True)
 
@@ -208,13 +272,20 @@ def fetch_single_post(
         try:
             pl = _normalise_url(url)
             _fetch_one(
-                browser=browser, tab_ref=tab_ref,
+                browser=browser,
+                tab_ref=tab_ref,
                 tweet={"permalink": pl, "author": "", "text": ""},
-                position=pos, html_path=hp,
-                timeout=timeout, poll_interval=poll_interval,
+                position=pos,
+                html_path=hp,
+                timeout=timeout,
+                poll_interval=poll_interval,
                 skip_back=True,
             )
-            r = {"permalink": pl, "html_file": str(hp), "md_file": str(hp.with_suffix(".md"))}
+            r = {
+                "permalink": pl,
+                "html_file": str(hp),
+                "md_file": str(hp.with_suffix(".md")),
+            }
             results.append(r)
             return r
         except WebScraperError as exc:
@@ -237,18 +308,26 @@ def fetch_single_post(
 
 
 def _fetch_tweet_and_quoted(
-    browser: BrowserTool, tab_ref: str,
-    url: str, title: str, position: int, html_path: Path,
-    timeout: float, poll_interval: float,
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    title: str,
+    position: int,
+    html_path: Path,
+    timeout: float,
+    poll_interval: float,
     *,
     is_standalone: bool = False,
 ) -> None:
     """Fetch a single tweet.  After the main tweet, recurse into quote tweets."""
     _fetch_one(
-        browser=browser, tab_ref=tab_ref,
+        browser=browser,
+        tab_ref=tab_ref,
         tweet={"permalink": _normalise_url(url), "author": "", "text": ""},
-        position=position, html_path=html_path,
-        timeout=timeout, poll_interval=poll_interval,
+        position=position,
+        html_path=html_path,
+        timeout=timeout,
+        poll_interval=poll_interval,
         skip_back=True,
     )
 
@@ -261,14 +340,19 @@ def _fetch_tweet_and_quoted(
         qhtml = html_path.parent / f"{qi:02d}-{qid}.html"
         try:
             _fetch_one(
-                browser=browser, tab_ref=tab_ref,
+                browser=browser,
+                tab_ref=tab_ref,
                 tweet={"permalink": qurl, "author": "", "text": ""},
-                position=qi, html_path=qhtml,
-                timeout=timeout, poll_interval=poll_interval,
+                position=qi,
+                html_path=qhtml,
+                timeout=timeout,
+                poll_interval=poll_interval,
                 skip_back=True,
             )
         except WebScraperError as exc:
-            print(f"[xcom-fetch] skip quoted {qurl}: {exc}", file=sys.stderr, flush=True)
+            print(
+                f"[xcom-fetch] skip quoted {qurl}: {exc}", file=sys.stderr, flush=True
+            )
 
 
 def _normalise_url(url: str) -> str:
@@ -276,13 +360,33 @@ def _normalise_url(url: str) -> str:
     return m.group(1) if m else url
 
 
+def _read_page_title(browser: BrowserTool, tab_ref: str, timeout: float) -> str:
+    try:
+        title = browser.eval_js(
+            tab_ref=tab_ref,
+            expression=(
+                "document.title || "
+                "document.querySelector('article')?.textContent?.slice(0, 120) || ''"
+            ),
+            timeout=timeout,
+        )
+    except WebScraperError:
+        return ""
+    return title.strip() if isinstance(title, str) else ""
+
+
 def _find_quoted_tweets(
-    browser: BrowserTool, tab_ref: str, timeout: float, max_quoted: int = 3,
+    browser: BrowserTool,
+    tab_ref: str,
+    timeout: float,
+    max_quoted: int = 3,
 ) -> list[str]:
     """Detect any quoted/embedded tweets in the current page."""
     try:
         urls = browser.eval_js(
-            tab_ref=tab_ref, expression=_FIND_QUOTED_JS, timeout=timeout,
+            tab_ref=tab_ref,
+            expression=_FIND_QUOTED_JS,
+            timeout=timeout,
         )
     except WebScraperError:
         return []
@@ -292,11 +396,16 @@ def _find_quoted_tweets(
 
 
 def _submit_search(
-    browser: BrowserTool, tab_ref: str, query: str, *,
-    timeout: float, poll_interval: float,
+    browser: BrowserTool,
+    tab_ref: str,
+    query: str,
+    *,
+    timeout: float,
+    poll_interval: float,
 ) -> None:
     wait_for(
-        timeout=timeout, poll_interval=poll_interval,
+        timeout=timeout,
+        poll_interval=poll_interval,
         task=lambda: browser.eval_js(
             tab_ref=tab_ref,
             expression=f"!!document.querySelector({SEARCH_INPUT_SELECTOR!r})",
@@ -314,14 +423,19 @@ def _submit_search(
     browser.keyboard_type(tab_ref=tab_ref, text=query, delay_ms=20)
     browser.keyboard_press(tab_ref=tab_ref, key="Enter")
     wait_for(
-        timeout=timeout, poll_interval=poll_interval,
+        timeout=timeout,
+        poll_interval=poll_interval,
         task=lambda: "/search?q=" in get_href(browser, tab_ref, timeout),
         error_message=f"Search did not navigate to results page for query {query!r}",
     )
 
 
 def _scroll_for_tweets(
-    browser: BrowserTool, tab_ref: str, *, timeout: float, target: int,
+    browser: BrowserTool,
+    tab_ref: str,
+    *,
+    timeout: float,
+    target: int,
 ) -> None:
     for _ in range(6):
         count = browser.eval_js(
@@ -341,13 +455,16 @@ def _scroll_for_tweets(
 
 def _fetch_one(
     *,
-    browser: BrowserTool, tab_ref: str,
-    tweet: dict, position: int, html_path: Path,
-    timeout: float, poll_interval: float,
+    browser: BrowserTool,
+    tab_ref: str,
+    tweet: dict,
+    position: int,
+    html_path: Path,
+    timeout: float,
+    poll_interval: float,
     skip_back: bool = False,
 ) -> None:
     permalink = tweet["permalink"]
-    results_url = get_href(browser, tab_ref, timeout)
 
     clicked = browser.eval_js(
         tab_ref=tab_ref,
@@ -356,20 +473,25 @@ def _fetch_one(
     )
     if not isinstance(clicked, dict) or not clicked.get("clicked"):
         browser.navigate(
-            tab_ref=tab_ref, url=permalink, timeout=timeout, wait_until="load",
+            tab_ref=tab_ref,
+            url=permalink,
+            timeout=timeout,
+            wait_until="load",
         )
     else:
         wait_for(
-            timeout=timeout, poll_interval=poll_interval,
+            timeout=timeout,
+            poll_interval=poll_interval,
             task=lambda: permalink.split("?")[0] in get_href(browser, tab_ref, timeout),
             error_message=f"Tweet page never loaded for {permalink}",
         )
 
     wait_for(
-        timeout=timeout, poll_interval=poll_interval,
+        timeout=timeout,
+        poll_interval=poll_interval,
         task=lambda: browser.eval_js(
             tab_ref=tab_ref,
-            expression="!!document.querySelector('article [data-testid=\"tweetText\"]') || !!document.querySelector('article')",
+            expression=_TWEET_ARTICLE_READY_JS,
             timeout=timeout,
         ),
         error_message=f"Tweet article never rendered for {permalink}",
@@ -378,15 +500,20 @@ def _fetch_one(
 
     md_body = _frontmatter(tweet, position)
     dump_html_and_md(
-        browser=browser, tab_ref=tab_ref,
-        url=permalink, md_body=md_body, html_path=html_path,
+        browser=browser,
+        tab_ref=tab_ref,
+        url=permalink,
+        md_body=md_body,
+        html_path=html_path,
         timeout=timeout,
     )
 
     if not skip_back:
         spam_back_until(
-            browser=browser, tab_ref=tab_ref,
-            timeout=timeout, poll_interval=poll_interval,
+            browser=browser,
+            tab_ref=tab_ref,
+            timeout=timeout,
+            poll_interval=poll_interval,
             predicate=lambda: "/search?q=" in get_href(browser, tab_ref, timeout),
             error_message="Did not return to x.com search results after history.back()",
         )

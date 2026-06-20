@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from chrome_scraper.html_to_md.extract import extract_current_page, scroll_full_page
 from chrome_scraper.html_to_md.render import render_page
@@ -38,12 +38,8 @@ def dump_html_and_md(
     except WebScraperError:
         pass
 
-    html = browser.eval_js(
-        tab_ref=tab_ref,
-        expression="document.documentElement.outerHTML",
-        timeout=timeout,
-    )
-    if not isinstance(html, str) or not html:
+    html = browser.html(tab_ref=tab_ref, timeout=timeout)
+    if not html:
         raise WebScraperError(f"Empty HTML from {url}")
     html_path.write_text(html, encoding="utf-8")
 
