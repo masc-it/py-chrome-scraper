@@ -162,6 +162,10 @@ class BrowserTool(Protocol):
 
     def html(self, *, tab_ref: str, timeout: float) -> str: ...
 
+    def document(
+        self, *, tab_ref: str, timeout: float, url: str | None = None
+    ) -> bytes: ...
+
 
 class WebScraper(ABC):
     name: str = "web-scraper"

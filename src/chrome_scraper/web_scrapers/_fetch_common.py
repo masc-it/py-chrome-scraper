@@ -15,6 +15,7 @@ from typing import Callable
 
 from chrome_scraper.html_to_md.extract import extract_current_page, scroll_full_page
 from chrome_scraper.html_to_md.render import render_page
+from chrome_scraper.pdf_to_text import is_pdf_page, pdf_bytes_to_text
 from chrome_scraper.web_scrapers.base import BrowserTool, WebScraperError
 
 
@@ -49,6 +50,26 @@ def dump_html_and_md(
     html_path.with_suffix(".md").write_text(
         md_body + render_page(items, page_width), encoding="utf-8"
     )
+
+
+def dump_pdf_and_md(
+    *,
+    browser: BrowserTool,
+    tab_ref: str,
+    url: str,
+    md_body: str,
+    html_path: Path,
+    timeout: float,
+) -> bool:
+    """Save a PDF and its extracted text, returning whether the page was a PDF."""
+    if not is_pdf_page(browser, tab_ref, url=url, timeout=timeout):
+        return False
+    data = browser.document(tab_ref=tab_ref, timeout=timeout, url=url)
+    text = pdf_bytes_to_text(data)
+    pdf_path = html_path.with_suffix(".pdf")
+    pdf_path.write_bytes(data)
+    html_path.with_suffix(".md").write_text(md_body + text, encoding="utf-8")
+    return True
 
 
 def spam_back_until(

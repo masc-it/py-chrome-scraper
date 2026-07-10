@@ -36,6 +36,7 @@ class RenderedPage:
     markdown: str
     extract_count: int
     handler_name: str
+    source_bytes: bytes | None = None
 
 
 class PagePreparer(Protocol):

@@ -17,6 +17,7 @@ from typing import Callable
 
 from chrome_scraper.html_to_md.extract import extract_current_page, scroll_full_page
 from chrome_scraper.html_to_md.render import render_page
+from chrome_scraper.pdf_to_text import is_pdf_page, pdf_bytes_to_text
 from chrome_scraper.web_scrapers.base import BrowserTool, WebScraperError, get_href
 from chrome_scraper.web_scrapers.url_page import (
     PagePreparer,
@@ -154,6 +155,33 @@ def render_url_as_markdown(
         timeout=timeout,
         poll_interval=poll_interval,
     )
+    if is_pdf_page(
+        browser,
+        tab_ref,
+        url=prepared.page_url or prepared.requested_url,
+        timeout=timeout,
+    ):
+        data = browser.document(
+            tab_ref=tab_ref,
+            timeout=timeout,
+            url=prepared.page_url or prepared.requested_url,
+        )
+        text = pdf_bytes_to_text(data)
+        parts: list[str] = []
+        if include_title_heading and prepared.title:
+            parts.append(f"# {prepared.title}\n\n")
+        parts.append(_markdown_block(markdown_prefix))
+        parts.append(_markdown_block(prepared.markdown_prefix))
+        parts.append(text)
+        return RenderedPage(
+            requested_url=prepared.requested_url,
+            page_url=prepared.page_url,
+            title=prepared.title,
+            markdown="".join(parts),
+            extract_count=0,
+            handler_name="pdf",
+            source_bytes=data,
+        )
     return render_prepared_page(
         browser=browser,
         tab_ref=tab_ref,

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 
 from chrome_scraper.html_to_md.extract import _EXTRACT_JS, _SCROLL_JS
@@ -369,6 +369,20 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 "X-Page-Url": page.url,
             },
         )
+
+    @app.get("/tabs/{tab_ref}/document")
+    async def get_document(tab_ref: str, url: str | None = None):
+        """Fetch the current document with the browser context's session."""
+        _, page = _resolve_tab(tab_ref)
+        try:
+            response = await _STATE.context.request.get(url or page.url)
+            if not response.ok:
+                raise RuntimeError(f"HTTP {response.status} {response.status_text}")
+            body = await response.body()
+            content_type = response.headers.get("content-type", "")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"document fetch failed: {exc}")
+        return Response(content=body, media_type=content_type or None)
 
     @app.post("/tabs/{tab_ref}/back")
     async def back(tab_ref: str):

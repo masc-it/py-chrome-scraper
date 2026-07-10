@@ -21,7 +21,11 @@ import time
 from pathlib import Path
 from typing import TypedDict
 
-from chrome_scraper.web_scrapers._fetch_common import dump_html_and_md, spam_back_until
+from chrome_scraper.web_scrapers._fetch_common import (
+    dump_html_and_md,
+    dump_pdf_and_md,
+    spam_back_until,
+)
 from chrome_scraper.web_scrapers.base import (
     BrowserTool,
     ScrapedDocument,
@@ -102,7 +106,7 @@ def fetch_query(
 
     save_index(all_results, out_dir / "results.json")
 
-    existing = len(list(out_dir.glob("*.html")))
+    existing = len(list(out_dir.glob("*.md")))
 
     fetched: list[FetchedPage] = []
     for idx, (i, item) in enumerate(
@@ -125,11 +129,16 @@ def fetch_query(
                 timeout=timeout,
                 poll_interval=poll_interval,
             )
+            source_path = (
+                html_path.with_suffix(".pdf")
+                if html_path.with_suffix(".pdf").exists()
+                else html_path
+            )
             fetched.append(
                 {
                     "title": title,
                     "url": url,
-                    "html_file": str(html_path),
+                    "html_file": str(source_path),
                     "md_file": str(html_path.with_suffix(".md")),
                 }
             )
@@ -212,14 +221,22 @@ def _fetch_one(
             frontmatter += f"description: {meta_desc!r}\n"
         frontmatter += "---\n\n"
 
-        dump_html_and_md(
+        if not dump_pdf_and_md(
             browser=browser,
             tab_ref=tab_ref,
             url=url,
             md_body=frontmatter,
             html_path=html_path,
             timeout=timeout,
-        )
+        ):
+            dump_html_and_md(
+                browser=browser,
+                tab_ref=tab_ref,
+                url=url,
+                md_body=frontmatter,
+                html_path=html_path,
+                timeout=timeout,
+            )
 
     # ── Both handler and generic flow: navigate back to Google ──
     spam_back_until(

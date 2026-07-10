@@ -94,6 +94,13 @@ def main(argv: list[str] | None = None) -> int:
         out_path = Path(args.output) if args.output else _DEFAULT_OUT_DIR / f"{slug}.md"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rendered.markdown, encoding="utf-8")
+        if rendered.source_bytes is not None:
+            pdf_path = out_path.with_suffix(".pdf")
+            pdf_path.write_bytes(rendered.source_bytes)
+            print(
+                f"wrote {pdf_path} ({pdf_path.stat().st_size} bytes)",
+                file=sys.stderr,
+            )
         print(f"wrote {out_path} ({out_path.stat().st_size} bytes)", file=sys.stderr)
 
     return 0

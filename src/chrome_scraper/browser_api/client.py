@@ -110,6 +110,17 @@ class BrowserAPIClient:
     def html(self, *, tab_ref: str, timeout: float) -> str:
         return self._get_text(f"/tabs/{tab_ref}/html", timeout=timeout)
 
+    def document(
+        self, *, tab_ref: str, timeout: float, url: str | None = None
+    ) -> bytes:
+        """Return the current document bytes using the browser session."""
+        path = f"/tabs/{tab_ref}/document"
+        if url is not None:
+            from urllib.parse import quote
+
+            path += f"?url={quote(url, safe='')}"
+        return self._get_bytes(path, timeout=timeout)
+
     def keyboard_type(self, *, tab_ref: str, text: str, delay_ms: int = 30) -> None:
         self._post(f"/tabs/{tab_ref}/type", json={"text": text, "delay_ms": delay_ms})
 
@@ -176,6 +187,12 @@ class BrowserAPIClient:
         if timeout is not None:
             kw["timeout"] = timeout
         return self._request_text("get", path, **kw)
+
+    def _get_bytes(self, path: str, *, timeout: float | None = None) -> bytes:
+        kw: dict[str, Any] = {}
+        if timeout is not None:
+            kw["timeout"] = timeout
+        return self._send("get", path, **kw).content
 
     def _post(
         self, path: str, *, json: dict | None = None, timeout: float | None = None

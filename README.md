@@ -107,6 +107,12 @@ url-to-md "https://www.youtube.com/watch?v=JVTUtdzqeGI" --output out/video.md
 url-to-md https://example.com --output -
 ```
 
+Direct PDF URLs are downloaded and converted with Poppler's `pdftotext`. When
+writing to a file, `url-to-md` keeps the original PDF beside the extracted
+markdown. `google-fetch` likewise writes `<name>.pdf` plus `<name>.md` instead
+of HTML for PDF results. Poppler must be installed and `pdftotext` available on
+`PATH`.
+
 ### html-to-md
 
 Render any URL (or local HTML file) as layout-preserving markdown.
@@ -309,6 +315,7 @@ with client.tab("my-tab"):
 
 - Uses the shared URL dispatcher and custom handlers automatically when a URL pattern is supported.
 - Falls back to generic layout-preserving extraction for unknown sites.
+- Downloads PDF pages and extracts their text with `pdftotext`.
 
 **html-to-md** — layout-preserving markdown via Chrome CDP:
 
